@@ -244,11 +244,18 @@ const makeCSS = (t) => `
   .mono{font-family:var(--mono);}
   .divider{border:none;border-top:1px solid var(--border);margin:12px 0;}
 
+  /* ── BOTTOM NAV (mobile) ── */
+  .bottom-nav{display:none;position:fixed;bottom:0;left:0;right:0;height:56px;background:var(--surface);border-top:1px solid var(--border);z-index:100;justify-content:space-around;align-items:center;padding:0 4px;}
+  .bnav-item{display:flex;flex-direction:column;align-items:center;gap:1px;padding:4px 10px;cursor:pointer;color:var(--muted);font-size:8px;font-weight:700;font-family:var(--mono);transition:all .15s;border-radius:6px;min-width:44px;}
+  .bnav-item.on{color:var(--amber);}
+  .bnav-icon{font-size:20px;line-height:1.2;}
   @media(max-width:768px){
     .side{display:none;}
     .stats{grid-template-columns:repeat(2,1fr);}
     .week-grid{grid-template-columns:repeat(4,1fr);}
     .cook-card{padding:16px;}
+    .bottom-nav{display:flex;}
+    .content{padding-bottom:72px;}
   }
 `;
 
@@ -330,7 +337,7 @@ const TEMPLATES = {
 const EQUIP_META={stove:{icon:"🔥",label:"コンロ"},oven:{icon:"🫙",label:"オーブン"},microwave:{icon:"📡",label:"電子レンジ"},mixer:{icon:"🌀",label:"ミキサー"}};
 
 // ── 週間プラン初期値 ─────────────────────────────────────────
-const makeEmptyWeek = () => DAYS.map(d=>({day:d, meals:{朝食:null,昼食:null,夕食:null}}));
+const makeEmptyWeek = () => DAYS.map(d=>({day:d, meals:{朝食:[],昼食:[],夕食:[]}}));
 
 // ════════════════════════════════════════════════════════════
 export default function KitchenOS() {
@@ -378,6 +385,13 @@ export default function KitchenOS() {
     if(!recipes.length){showToast("⚠ レシピを追加してください");return;}
     setSched(buildSchedule(recipes,equip,serveTime));
     setTab("schedule");showToast("✓ スケジュール生成完了");
+  };
+  const genScheduleForMeal=(dayIdx,mealType)=>{
+    const mealList=weekPlan[dayIdx].meals[mealType]||[];
+    const mealRecipes=mealList.map(m=>recipes.find(r=>r.id===m.id)).filter(Boolean);
+    if(!mealRecipes.length){showToast("⚠ メニューが登録されていません");return;}
+    setSched(buildSchedule(mealRecipes,equip,serveTime));
+    setTab("schedule");showToast(`✓ ${weekPlan[dayIdx].day}曜 ${mealType} のスケジュール生成完了`);
   };
 
   // ── cooking mode ──
@@ -431,13 +445,22 @@ export default function KitchenOS() {
   const setER=(fn)=>setEditRecipe(prev=>fn({...prev}));
 
   // ── week planner ──
-  const setMeal=(dayIdx,mealType,recipe)=>{
+  const addMeal=(dayIdx,mealType,recipe)=>{
     setWeekPlan(p=>{
       const np=[...p];
-      np[dayIdx]={...np[dayIdx],meals:{...np[dayIdx].meals,[mealType]:recipe?{id:recipe.id,name:recipe.name,color:recipe.color}:null}};
+      const cur=np[dayIdx].meals[mealType]||[];
+      if(cur.find(m=>m.id===recipe.id))return p;
+      np[dayIdx]={...np[dayIdx],meals:{...np[dayIdx].meals,[mealType]:[...cur,{id:recipe.id,name:recipe.name,color:recipe.color}]}};
       return np;
     });
-    setMealPickTarget(null);
+  };
+  const removeMeal=(dayIdx,mealType,recipeId)=>{
+    setWeekPlan(p=>{
+      const np=[...p];
+      const cur=np[dayIdx].meals[mealType]||[];
+      np[dayIdx]={...np[dayIdx],meals:{...np[dayIdx].meals,[mealType]:cur.filter(m=>m.id!==recipeId)}};
+      return np;
+    });
   };
 
   // ── shop list from week ──
@@ -446,13 +469,14 @@ export default function KitchenOS() {
     weekPlan.forEach((dayObj,di)=>{
       if(dayIdxFilter!=null&&di!==dayIdxFilter)return;
       MEAL_TYPES.forEach(mt=>{
-        const meal=dayObj.meals[mt];
-        if(!meal)return;
-        const recipe=recipes.find(r=>r.id===meal.id);
-        if(!recipe)return;
-        (recipe.ingredients||[]).forEach(ing=>{
-          const key=`${recipe.id}_${ing.name}`;
-          if(!m[key])m[key]={name:ing.name,amount:ing.amount,recipeName:recipe.name,recipeColor:recipe.color,key};
+        const mealList=dayObj.meals[mt]||[];
+        mealList.forEach(meal=>{
+          const recipe=recipes.find(r=>r.id===meal.id);
+          if(!recipe)return;
+          (recipe.ingredients||[]).forEach(ing=>{
+            const key=`${recipe.id}_${ing.name}`;
+            if(!m[key])m[key]={name:ing.name,amount:ing.amount,recipeName:recipe.name,recipeColor:recipe.color,key};
+          });
         });
       });
     });
@@ -526,7 +550,7 @@ export default function KitchenOS() {
         </div>
       </div>
       <div className="stats">
-        {[{n:recipes.length,l:"レシピ数"},{n:recipes.reduce((s,r)=>s+(r.steps?.length||0),0),l:"総工程数"},{n:recipes.reduce((s,r)=>s+(r.steps?.reduce((a,st)=>a+st.duration_min,0)||0),0),l:"合計調理時間(分)"},{n:weekPlan.reduce((s,d)=>s+MEAL_TYPES.filter(m=>d.meals[m]).length,0),l:"今週の予定食数"}].map((x,i)=>(
+        {[{n:recipes.length,l:"レシピ数"},{n:recipes.reduce((s,r)=>s+(r.steps?.length||0),0),l:"総工程数"},{n:recipes.reduce((s,r)=>s+(r.steps?.reduce((a,st)=>a+st.duration_min,0)||0),0),l:"合計調理時間(分)"},{n:weekPlan.reduce((s,d)=>s+MEAL_TYPES.reduce((s2,m)=>s2+(d.meals[m]?.length||0),0),0),l:"今週の予定食数"}].map((x,i)=>(
           <div key={i} className="stat"><div className="stat-n">{x.n}</div><div className="stat-l">{x.l}</div></div>
         ))}
       </div>
@@ -598,7 +622,7 @@ export default function KitchenOS() {
 
       <div className="week-grid">
         {weekPlan.map((dayObj,di)=>{
-          const hasMeals=MEAL_TYPES.some(m=>dayObj.meals[m]);
+          const hasMeals=MEAL_TYPES.some(m=>(dayObj.meals[m]||[]).length>0);
           return(
           <div key={di} className="week-col">
             {/* 曜日ヘッダー + 買い物ボタン */}
@@ -613,21 +637,34 @@ export default function KitchenOS() {
               </button>
             </div>
             {MEAL_TYPES.map(mt=>{
-              const meal=dayObj.meals[mt];
+              const mealList=dayObj.meals[mt]||[];
+              const firstColor=mealList.length>0?mealList[0].color:undefined;
               return(
-                <div key={mt} className={`week-meal-slot ${meal?"filled":""}`}
+                <div key={mt} className={`week-meal-slot ${mealList.length>0?"filled":""}`}
                   onClick={()=>setMealPickTarget({dayIdx:di,mealType:mt})}
-                  style={{borderColor:meal?meal.color:undefined}}>
-                  <div className="week-meal-type">{mt}</div>
-                  {meal
-                    ?<div className="week-meal-name"><span className="week-meal-dot" style={{background:meal.color}}/>{meal.name}</div>
+                  style={{borderColor:firstColor,minHeight:52}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:3}}>
+                    <div className="week-meal-type" style={{margin:0}}>{mt}</div>
+                    {mealList.length>0&&(
+                      <button style={{background:"none",border:"none",cursor:"pointer",padding:"0 2px",fontSize:10,color:"var(--amber)",fontFamily:"var(--mono)",fontWeight:700,lineHeight:1}}
+                        onClick={e=>{e.stopPropagation();genScheduleForMeal(di,mt);}}>⚡</button>
+                    )}
+                  </div>
+                  {mealList.length>0
+                    ?<div style={{display:"flex",flexDirection:"column",gap:2}}>
+                      {mealList.map(meal=>(
+                        <div key={meal.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:2}}>
+                          <div className="week-meal-name" style={{fontSize:9,flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                            <span className="week-meal-dot" style={{background:meal.color}}/>{meal.name}
+                          </div>
+                          <span style={{fontSize:9,color:"var(--muted)",cursor:"pointer",flexShrink:0}} onClick={e=>{e.stopPropagation();removeMeal(di,mt,meal.id);}}>✕</span>
+                        </div>
+                      ))}
+                      <div style={{fontSize:9,color:"var(--amber)",textAlign:"center",marginTop:1,cursor:"pointer"}}
+                        onClick={e=>{e.stopPropagation();setMealPickTarget({dayIdx:di,mealType:mt});}}>+ 追加</div>
+                    </div>
                     :<div className="week-meal-empty">+ 追加</div>
                   }
-                  {meal&&(
-                    <div style={{marginTop:4,display:"flex",gap:4,justifyContent:"flex-end"}}>
-                      <span style={{fontSize:9,color:"var(--muted)",cursor:"pointer"}} onClick={e=>{e.stopPropagation();setMeal(di,mt,null);}}>✕</span>
-                    </div>
-                  )}
                 </div>
               );
             })}
@@ -641,7 +678,7 @@ export default function KitchenOS() {
         <div className="ch"><div className="ct">📊 今週のサマリ</div></div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:10}}>
           {recipes.map(r=>{
-            const cnt=weekPlan.reduce((s,d)=>s+MEAL_TYPES.filter(m=>d.meals[m]?.id===r.id).length,0);
+            const cnt=weekPlan.reduce((s,d)=>s+MEAL_TYPES.reduce((s2,m)=>s2+(d.meals[m]||[]).filter(x=>x.id===r.id).length,0),0);
             if(!cnt)return null;
             return(
               <div key={r.id} style={{background:"var(--surface2)",border:`1px solid ${r.color}`,borderRadius:6,padding:10}}>
@@ -666,22 +703,27 @@ export default function KitchenOS() {
             <div className="modal-t">
               {weekPlan[mealPickTarget.dayIdx].day}曜 {mealPickTarget.mealType} のレシピを選ぶ
             </div>
+            <div style={{fontSize:11,color:"var(--muted)",marginBottom:10}}>タップで追加・削除（複数選択可）</div>
             <div style={{display:"flex",flexDirection:"column",gap:8}}>
-              {recipes.map(r=>(
-                <div key={r.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 12px",background:"var(--surface2)",border:"1px solid var(--border)",borderRadius:6,cursor:"pointer"}}
-                  onClick={()=>setMeal(mealPickTarget.dayIdx,mealPickTarget.mealType,r)}>
-                  <div style={{display:"flex",alignItems:"center",gap:8}}>
-                    <div style={{width:8,height:8,borderRadius:"50%",background:r.color}}/>
-                    <span style={{fontWeight:700,fontSize:13,color:"var(--text)"}}>{r.name}</span>
-                    <span className={`tag ${r.category==="メイン"?"t-amber":r.category==="前菜"?"t-green":"t-blue"}`}>{r.category}</span>
+              {recipes.map(r=>{
+                const cur=weekPlan[mealPickTarget.dayIdx].meals[mealPickTarget.mealType]||[];
+                const isAdded=!!cur.find(m=>m.id===r.id);
+                return(
+                  <div key={r.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 12px",background:isAdded?"rgba(180,100,0,.08)":"var(--surface2)",border:`1px solid ${isAdded?"var(--amber)":"var(--border)"}`,borderRadius:6,cursor:"pointer",transition:"all .15s"}}
+                    onClick={()=>{if(isAdded)removeMeal(mealPickTarget.dayIdx,mealPickTarget.mealType,r.id);else addMeal(mealPickTarget.dayIdx,mealPickTarget.mealType,r);}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <div style={{width:8,height:8,borderRadius:"50%",background:r.color}}/>
+                      <span style={{fontWeight:700,fontSize:13,color:"var(--text)"}}>{r.name}</span>
+                      <span className={`tag ${r.category==="メイン"?"t-amber":r.category==="前菜"?"t-green":"t-blue"}`}>{r.category}</span>
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",gap:6}}>
+                      <span className="tag t-muted">{(r.steps||[]).reduce((s,st)=>s+st.duration_min,0)}分</span>
+                      {isAdded&&<span style={{color:"var(--amber)",fontWeight:800,fontSize:14}}>✓</span>}
+                    </div>
                   </div>
-                  <span className="tag t-muted">{(r.steps||[]).reduce((s,st)=>s+st.duration_min,0)}分</span>
-                </div>
-              ))}
-              {weekPlan[mealPickTarget.dayIdx].meals[mealPickTarget.mealType]&&(
-                <button className="btn b-red w100" onClick={()=>setMeal(mealPickTarget.dayIdx,mealPickTarget.mealType,null)}>✕ 削除</button>
-              )}
-              <button className="btn b-ghost w100" onClick={()=>setMealPickTarget(null)}>閉じる</button>
+                );
+              })}
+              <button className="btn b-ghost w100" onClick={()=>setMealPickTarget(null)}>完了</button>
             </div>
           </div>
         </div>
@@ -722,7 +764,7 @@ export default function KitchenOS() {
           <div style={{width:1,height:28,background:"var(--border)",margin:"0 4px"}}/>
           {/* 曜日ボタン */}
           {weekPlan.map((dayObj,i)=>{
-            const hasMeals=MEAL_TYPES.some(m=>dayObj.meals[m]);
+            const hasMeals=MEAL_TYPES.some(m=>(dayObj.meals[m]||[]).length>0);
             const isToday=i===new Date().getDay()-1;
             const isSelected=shopDay===i;
             return(
@@ -741,7 +783,7 @@ export default function KitchenOS() {
                 }}>
                 {dayObj.day}
                 {isToday&&!isSelected&&<span style={{position:"absolute",top:-3,right:-3,width:7,height:7,borderRadius:"50%",background:"var(--amber)",border:"1.5px solid var(--bg)"}}/>}
-                {hasMeals&&!isSelected&&<span style={{display:"block",fontSize:8,color:"var(--muted)",marginTop:1,fontWeight:400}}>{MEAL_TYPES.filter(m=>dayObj.meals[m]).length}食</span>}
+                {hasMeals&&!isSelected&&<span style={{display:"block",fontSize:8,color:"var(--muted)",marginTop:1,fontWeight:400}}>{MEAL_TYPES.reduce((s,m)=>s+(dayObj.meals[m]?.length||0),0)}食</span>}
               </button>
             );
           })}
@@ -1134,6 +1176,16 @@ export default function KitchenOS() {
           {tab==="recipe-detail" && tabRecipeDetail()}
         </main>
       </div>
+
+      {/* BOTTOM NAV (mobile) */}
+      <nav className="bottom-nav">
+        {NAV.map(n=>(
+          <div key={n.id} className={`bnav-item ${tab===n.id?"on":""}`} onClick={()=>setTab(n.id)}>
+            <span className="bnav-icon">{n.icon}</span>
+            <span>{n.label}</span>
+          </div>
+        ))}
+      </nav>
 
       {/* ══ COOKING MODE ══ */}
       {cookMode&&cookStep&&(()=>{
