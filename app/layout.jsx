@@ -1,6 +1,4 @@
-import type { Metadata } from 'next'
-
-export const metadata: Metadata = {
+export const metadata = {
   title: 'KitchenOS — 料理スケジューラ',
   description: '料理をプロジェクト管理として扱う。複数メニューの調理を自動スケジューリング。',
 }

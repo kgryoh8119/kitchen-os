@@ -1,6 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 
-export async function POST(req: NextRequest) {
+export async function POST(req) {
   const { prompt } = await req.json()
 
   const apiKey = process.env.ANTHROPIC_API_KEY
@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
   }
 
   const data = await res.json()
-  const text = data.content?.map((b: { type: string; text?: string }) => b.text || '').join('') || ''
+  const text = data.content?.map(b => b.text || '').join('') || ''
 
   try {
     const clean = text.replace(/```json|```/g, '').trim()
