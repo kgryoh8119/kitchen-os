@@ -381,6 +381,11 @@ export default function KitchenOS() {
   const [aiPrompt,setAiPrompt] = useState("");
   const [aiLoading,setAiLoad]  = useState(false);
 
+  // URL recipe parsing
+  const [urlPanel,setUrlPanel] = useState(false);
+  const [urlInput,setUrlInput] = useState("");
+  const [urlLoading,setUrlLoad]= useState(false);
+
   // Cooking history (localStorage)
   const [cookHistory,setCookHistory] = useState(()=>{
     try{return JSON.parse(localStorage.getItem("kitchenHistory")||"[]");}catch{return[];}
@@ -462,6 +467,25 @@ export default function KitchenOS() {
       }else{showToast("⚠ AI生成に失敗しました");}
     }catch{showToast("⚠ エラーが発生しました");}
     finally{setAiLoad(false);}
+  };
+
+  // ── URL recipe parse ──
+  const parseRecipeFromUrl=async()=>{
+    if(!urlInput.trim())return;
+    setUrlLoad(true);
+    try{
+      const res=await fetch("/api/parse-recipe",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({url:urlInput.trim()})});
+      const data=await res.json();
+      if(data.recipe){
+        const id=`r_${uid()}`;
+        const recipe={...data.recipe,id,color:COLORS[recipes.length%COLORS.length]};
+        setRecipes(p=>[...p,recipe]);
+        setUrlPanel(false);setUrlInput("");
+        showToast(`✓ ${recipe.name} を取り込みました`);
+        openDetail(id);
+      }else{showToast("⚠ "+(data.error||"取り込みに失敗しました"));}
+    }catch{showToast("⚠ エラーが発生しました");}
+    finally{setUrlLoad(false);}
   };
 
   // ── cooking history ──
@@ -608,6 +632,7 @@ export default function KitchenOS() {
           <div className="ct">🍽 レシピライブラリ</div>
           <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
             <button className="btn b-amber b-sm" onClick={createBlankRecipe}>+ 新規作成</button>
+            <button className="btn b-blue b-sm" onClick={()=>setUrlPanel(true)}>🔗 URLから取込</button>
             <button className="btn b-purple b-sm" onClick={()=>setAiPanel(true)}>🤖 AI生成</button>
             {Object.entries(TEMPLATES).map(([k,t])=>(
               <button key={k} className="btn b-ghost b-sm" onClick={()=>{setRecipes(p=>[...p,{...t,id:`r_${uid()}`,color:COLORS[p.length%COLORS.length]}]);showToast("✓ "+t.name+"を追加");}}>+ {t.name}</button>
@@ -1361,6 +1386,29 @@ export default function KitchenOS() {
             {(tip.step.ingredients||[]).map((ing,i)=><div key={i} className="gtip-ing"><span style={{color:"var(--text)"}}>{ing.name}</span><span style={{color:"var(--amber)",fontWeight:700}}>{ing.amount}</span></div>)}</>
           )}
           {tip.step.note&&<div style={{marginTop:5,fontSize:9,color:"var(--amber)",borderTop:"1px solid var(--border)",paddingTop:4}}>💡 {tip.step.note}</div>}
+        </div>
+      )}
+
+      {/* URL Recipe Parse Panel */}
+      {urlPanel&&(
+        <div className="overlay" onClick={()=>setUrlPanel(false)}>
+          <div className="modal" onClick={e=>e.stopPropagation()}>
+            <div className="modal-t">🔗 URLからレシピを取込</div>
+            <div className="muted sm" style={{marginBottom:14}}>レシピサイトのURLを貼るとAIが自動でレシピを解析します</div>
+            <div style={{marginBottom:8,fontSize:10,color:"var(--muted)"}}>対応例: クックパッド、delish kitchen、NHKきょうの料理 など</div>
+            <label className="edit-label">レシピページのURL</label>
+            <input className="inp" style={{marginBottom:12}} placeholder="https://cookpad.com/recipe/..." value={urlInput}
+              onChange={e=>setUrlInput(e.target.value)}
+              onKeyDown={e=>{if(e.key==="Enter"&&!urlLoading)parseRecipeFromUrl();}}
+              autoFocus/>
+            <div style={{display:"flex",gap:8}}>
+              <button className="btn b-blue" style={{flex:1,justifyContent:"center"}} onClick={parseRecipeFromUrl} disabled={urlLoading||!urlInput.trim()}>
+                {urlLoading?"⏳ 解析中...":"🔍 取り込む"}
+              </button>
+              <button className="btn b-ghost" onClick={()=>{setUrlPanel(false);setUrlInput("");}}>キャンセル</button>
+            </div>
+            {urlLoading&&<div style={{marginTop:12,textAlign:"center",fontSize:11,color:"var(--muted)"}}>ページを取得してAIが解析しています…（15〜30秒）</div>}
+          </div>
         </div>
       )}
 
