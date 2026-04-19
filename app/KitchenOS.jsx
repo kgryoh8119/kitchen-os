@@ -376,6 +376,16 @@ export default function KitchenOS() {
 
   const [checked,setChecked] = useState({});
 
+  // AI recipe generation
+  const [aiPanel,setAiPanel]   = useState(false);
+  const [aiPrompt,setAiPrompt] = useState("");
+  const [aiLoading,setAiLoad]  = useState(false);
+
+  // Cooking history (localStorage)
+  const [cookHistory,setCookHistory] = useState(()=>{
+    try{return JSON.parse(localStorage.getItem("kitchenHistory")||"[]");}catch{return[];}
+  });
+
   const sortedSched = schedule?[...schedule].sort((a,b)=>a.startMin-b.startMin):[];
   const showToast = useCallback(msg=>{setToast(msg);setTimeout(()=>setToast(null),2800);},[]);
   const css = makeCSS(theme);
@@ -416,12 +426,51 @@ export default function KitchenOS() {
   const goNext=()=>{
     if(timerRef.current)clearInterval(timerRef.current);setRunning(false);
     const ni=cookIdx+1;
-    if(ni>=sortedSched.length){setCook(false);showToast("🎉 全工程完了！");return;}
+    if(ni>=sortedSched.length){saveHistory();setCook(false);showToast("🎉 全工程完了！");return;}
     setCookIdx(ni);setSecLeft(sortedSched[ni].duration_min*60);
   };
   const goPrev=()=>{
     if(timerRef.current)clearInterval(timerRef.current);setRunning(false);
     const pi=Math.max(0,cookIdx-1);setCookIdx(pi);setSecLeft(sortedSched[pi].duration_min*60);
+  };
+
+  // ── blank recipe create ──
+  const createBlankRecipe=()=>{
+    const id=`r_${uid()}`;
+    const r={id,name:"新規レシピ",category:"メイン",color:COLORS[recipes.length%COLORS.length],ingredients:[],steps:[]};
+    setRecipes(p=>[...p,r]);
+    setDetailId(id);setDetailView("flow");
+    setEditRecipe(JSON.parse(JSON.stringify(r)));
+    setEditMode(true);setTab("recipe-detail");
+  };
+
+  // ── AI recipe generate ──
+  const generateAiRecipe=async()=>{
+    if(!aiPrompt.trim())return;
+    setAiLoad(true);
+    try{
+      const prompt=`以下の料理のレシピをJSON形式で返してください。\n料理名: ${aiPrompt}\n\nJSONフォーマット:\n{\n  "name":"料理名",\n  "category":"メイン|前菜|スープ|デザート",\n  "ingredients":[{"name":"食材名","amount":"分量"}],\n  "steps":[{"id":1,"description":"工程説明","duration_min":5,"requires_equipment":[],"hands_on":true,"depends_on":[],"ingredients":[{"name":"食材名","amount":"分量"}],"note":"コツ"}]\n}\n\nJSONのみ返してください。説明不要。`;
+      const res=await fetch("/api/ai-recipe",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({prompt})});
+      const data=await res.json();
+      if(data.recipe){
+        const id=`r_${uid()}`;
+        const recipe={...data.recipe,id,color:COLORS[recipes.length%COLORS.length]};
+        setRecipes(p=>[...p,recipe]);
+        setAiPanel(false);setAiPrompt("");
+        showToast(`✓ ${recipe.name} を生成しました`);
+        openDetail(id);
+      }else{showToast("⚠ AI生成に失敗しました");}
+    }catch{showToast("⚠ エラーが発生しました");}
+    finally{setAiLoad(false);}
+  };
+
+  // ── cooking history ──
+  const saveHistory=()=>{
+    const names=[...new Set(sortedSched.map(s=>s.recipeName))];
+    const entry={id:uid(),date:new Date().toISOString(),recipes:names,colors:Object.fromEntries(names.map(n=>{const s=sortedSched.find(x=>x.recipeName===n);return[n,s.recipeColor];})),steps:sortedSched.length,totalMin:sortedSched.reduce((s,x)=>s+x.duration_min,0)};
+    const next=[entry,...cookHistory].slice(0,30);
+    setCookHistory(next);
+    try{localStorage.setItem("kitchenHistory",JSON.stringify(next));}catch{}
   };
 
   // ── recipe detail open ──
@@ -557,7 +606,9 @@ export default function KitchenOS() {
       <div className="card">
         <div className="ch">
           <div className="ct">🍽 レシピライブラリ</div>
-          <div style={{display:"flex",gap:6}}>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+            <button className="btn b-amber b-sm" onClick={createBlankRecipe}>+ 新規作成</button>
+            <button className="btn b-purple b-sm" onClick={()=>setAiPanel(true)}>🤖 AI生成</button>
             {Object.entries(TEMPLATES).map(([k,t])=>(
               <button key={k} className="btn b-ghost b-sm" onClick={()=>{setRecipes(p=>[...p,{...t,id:`r_${uid()}`,color:COLORS[p.length%COLORS.length]}]);showToast("✓ "+t.name+"を追加");}}>+ {t.name}</button>
             ))}
@@ -1100,8 +1151,55 @@ export default function KitchenOS() {
     {id:"week",     icon:"📅",label:"週間プランナー"},
     {id:"shopping", icon:"🛒",label:"買い物リスト"},
     {id:"schedule", icon:"📊",label:"スケジュール"},
+    {id:"history",  icon:"📖",label:"調理履歴"},
     {id:"equipment",icon:"🔧",label:"設備管理"},
   ];
+
+  // ════════════════════════════════════════════════════════════
+  // TAB: History
+  // ════════════════════════════════════════════════════════════
+  const tabHistory=()=>(
+    <div>
+      <div style={{marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
+        <div>
+          <div style={{fontSize:20,fontWeight:800,marginBottom:3,color:"var(--text)"}}>調理履歴</div>
+          <div className="muted sm">調理完了後に自動保存されます（最大30件）</div>
+        </div>
+        {cookHistory.length>0&&<button className="btn b-red b-sm" onClick={()=>{setCookHistory([]);try{localStorage.removeItem("kitchenHistory");}catch{}showToast("✓ 履歴を削除しました");}}>🗑 全削除</button>}
+      </div>
+      {!cookHistory.length?(
+        <div className="card" style={{textAlign:"center",padding:"50px 0"}}>
+          <div style={{fontSize:36,marginBottom:10}}>📖</div>
+          <div className="muted sm">まだ調理履歴がありません</div>
+          <div style={{marginTop:12}}><button className="btn b-amber" onClick={()=>setTab("schedule")}>📊 スケジュールへ</button></div>
+        </div>
+      ):cookHistory.map(h=>{
+        const d=new Date(h.date);
+        const label=`${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+        return(
+          <div key={h.id} className="card" style={{marginBottom:10}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
+              <div>
+                <div style={{fontSize:12,fontFamily:"var(--mono)",color:"var(--muted)",marginBottom:4}}>{label}</div>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  {h.recipes.map(n=>(
+                    <div key={n} style={{display:"flex",alignItems:"center",gap:5}}>
+                      <div style={{width:7,height:7,borderRadius:"50%",background:h.colors?.[n]||"var(--amber)"}}/>
+                      <span style={{fontWeight:700,fontSize:12,color:"var(--text)"}}>{n}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div style={{display:"flex",gap:8}}>
+                <span className="tag t-muted">{h.steps}工程</span>
+                <span className="tag t-amber">{h.totalMin}分</span>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
 
   const tabEquip=()=>(
     <div>
@@ -1172,6 +1270,7 @@ export default function KitchenOS() {
           {tab==="week"          && tabWeek()}
           {tab==="shopping"      && tabShop()}
           {tab==="schedule"      && tabSched()}
+          {tab==="history"       && tabHistory()}
           {tab==="equipment"     && tabEquip()}
           {tab==="recipe-detail" && tabRecipeDetail()}
         </main>
@@ -1262,6 +1361,28 @@ export default function KitchenOS() {
             {(tip.step.ingredients||[]).map((ing,i)=><div key={i} className="gtip-ing"><span style={{color:"var(--text)"}}>{ing.name}</span><span style={{color:"var(--amber)",fontWeight:700}}>{ing.amount}</span></div>)}</>
           )}
           {tip.step.note&&<div style={{marginTop:5,fontSize:9,color:"var(--amber)",borderTop:"1px solid var(--border)",paddingTop:4}}>💡 {tip.step.note}</div>}
+        </div>
+      )}
+
+      {/* AI Recipe Panel */}
+      {aiPanel&&(
+        <div className="overlay" onClick={()=>setAiPanel(false)}>
+          <div className="modal" onClick={e=>e.stopPropagation()}>
+            <div className="modal-t">🤖 AIレシピ生成</div>
+            <div className="muted sm" style={{marginBottom:14}}>料理名を入力するとAIがレシピを自動生成します</div>
+            <label className="edit-label">料理名</label>
+            <input className="inp" style={{marginBottom:12}} placeholder="例: 肉じゃが、ペペロンチーノ..." value={aiPrompt}
+              onChange={e=>setAiPrompt(e.target.value)}
+              onKeyDown={e=>{if(e.key==="Enter"&&!aiLoading)generateAiRecipe();}}
+              autoFocus/>
+            <div style={{display:"flex",gap:8}}>
+              <button className="btn b-purple" style={{flex:1,justifyContent:"center"}} onClick={generateAiRecipe} disabled={aiLoading||!aiPrompt.trim()}>
+                {aiLoading?"⏳ 生成中...":"✨ 生成する"}
+              </button>
+              <button className="btn b-ghost" onClick={()=>{setAiPanel(false);setAiPrompt("");}}>キャンセル</button>
+            </div>
+            {aiLoading&&<div style={{marginTop:12,textAlign:"center",fontSize:11,color:"var(--muted)"}}>AIがレシピを考えています…（10〜20秒）</div>}
+          </div>
         </div>
       )}
 
